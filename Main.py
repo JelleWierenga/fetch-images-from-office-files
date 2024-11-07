@@ -1,11 +1,24 @@
 import os
+import shutil
 import pandas as pd
 import hashlib
 import zipfile
 
+# Oorspronkelijke folder met bestanden
+file_path = "path/to/files"
+
+# Maak een tijdelijke map voor kopieën
+temp_folder = "temp_files"
+os.makedirs(temp_folder, exist_ok=True)
+
+# Kopieer alle bestanden uit file_path naar de tijdelijke map
+for file in os.listdir(file_path):
+    shutil.copy(os.path.join(file_path, file), os.path.join(temp_folder, file))
+
+# DataFrame om resultaten op te slaan
 df = pd.DataFrame(columns=["file_name", "image_name", "image_hash"])
 
-# vindt de bestand type om te gebruiken in data en foto's extracten
+# Functie om bestandstype en pad naar afbeeldingen te bepalen
 def get_file_type(file):
     if ".docx" in file or ".doc" in file:
         file_name = "word"
@@ -22,36 +35,16 @@ def get_file_type(file):
         file_extension = "xlsx"
         path = "xl/media/"
         return file_name, file_extension, path
-    # elif ".odt" in file:
-    #     file_name = "libreoffice_text"
-    #     file_extension = "odt"
-    #     path = "Pictures/"
-    #     return file_name, file_extension, path
-    # elif ".ods" in file:
-    #     file_name = "libreoffice_sheet"
-    #     file_extension = "ods"
-    #     path = "Pictures/"
-    #     return file_name, file_extension, path
-    # elif ".odp" in file:
-    #     file_name = "libreoffice_presentation"
-    #     file_extension = "odp"
-    #     path = "Pictures/"
-    #     return file_name, file_extension, path
-    # return None
 
-def fetch_images_mso(files, path):
+# Functie om afbeeldingen uit MS Office-bestanden te halen en hashen
+def fetch_images_mso(files, path, temp_folder):
     global df
     extensions_list = [".png", ".jpg", ".jpeg"]
     try:
-        with zipfile.ZipFile(f"files/{files}") as extraction:
-            # extraction.extractall("extracted")
-            # full_path = os.path.join("extracted", path)
-
+        with zipfile.ZipFile(f"{temp_folder}/{files}") as extraction:
             for i in range(len(extraction.namelist())):
                 for extensions in extensions_list:
                     try:
-                        # for files in os.path.join("extracted", full_path):
-                        #     print(files)
                         extraction.extract(path + "image" + str(i + 1) + f"{extensions}", "extracted")
                         hash = hashlib.sha256(extraction.read(path + "image" + str(i + 1) + f"{extensions}")).hexdigest()
                         new_column = pd.DataFrame({"file_name": files, "image_name": f"image{i + 1}{extensions}", "image_hash": hash}, index=[0])
@@ -61,27 +54,44 @@ def fetch_images_mso(files, path):
     except zipfile.BadZipFile:
         print(f"{files} is een leeg bestand")
 
-
-
-
-for files in os.listdir("files"):
-    # print(files)
+# Loop door bestanden in de tijdelijke map
+for files in os.listdir(temp_folder):
     info = get_file_type(files)
     if info is not None:
-        # print(info)
         path = info[2]
-        fetch_images_mso(files, path)
+        fetch_images_mso(files, path, temp_folder)
+
+# Resultaten opslaan in CSV
 print(df)
 df.to_csv('output1.txt', sep='\t', index=False)
 
-report = open('report.txt', 'w')
-report.write("Files with images:\n")
-files_with_image = df.file_name.unique()
-for file in files_with_image:
-    report.write(file + "\n")
+# Rapport maken
+with open('report.txt', 'w') as report:
+    #rapporteer bestanden die afbeeldingen hebben
+    report.write("Files with images:\n")
+    files_with_image = df.file_name.unique()
+    for file in files_with_image:
+        report.write(file + "\n")
 
-report.write("\n\nFiles with image count:\n")
-count = df.groupby('file_name').size().reset_index(name='count')
-for _, row in count.iterrows():
-    report.write(f"{row['file_name']} has {row['count']} images linked\n")
+    # Rapporteer bestanden met aantal afbeeldingen
+    report.write("\n\nFiles with image count:\n")
+    count = df.groupby('file_name').size().reset_index(name='count')
+    for _, row in count.iterrows():
+        report.write(f"{row['file_name']} has {row['count']} images linked\n")
 
+    # rapporteer hashes die overeenkomen
+    report.write("\n\nHash Comparison:\n")
+    with open("hashes.txt", 'r') as hash_file:  # Bestand met te vergelijken hashes
+        for line in hash_file:
+            image_name, file_hash = line.strip().split(": ")
+
+            # Controleer of de hash bestaat in de dataframe
+            if file_hash in df['image_hash'].values:
+                # Zoek de bijbehorende rij in de dataframe
+                matching_row = df[df['image_hash'] == file_hash].iloc[0]
+                report.write(f"{image_name} with hash {file_hash} exists in the DataFrame.\n")
+                report.write(f"Details \nFile: {matching_row['file_name']}, Image Name: {matching_row['image_name']}\n")
+            else:
+                report.write(f"{image_name} with hash {file_hash} does NOT exist in the DataFrame.\n")
+
+# shutil.rmtree(temp_folder)
